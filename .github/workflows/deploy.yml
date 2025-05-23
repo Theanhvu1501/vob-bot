@@ -41,6 +41,7 @@ jobs:
           NOTION_DATABASE_ID=${{ secrets.NOTION_DATABASE_ID }}
           GEMINI_API_KEY=${{ secrets.GOOGLE_AI_API_KEY }}
           USER_CHAT_ID=${{ secrets.USER_CHAT_ID }}
+          GROUP_CHAT_ID=${{ secrets.GROUP_CHAT_ID }}
           QUIZ_HOUR=${{ secrets.QUIZ_HOUR || '8' }}
           QUIZ_MINUTE=${{ secrets.QUIZ_MINUTE || '0' }}
           NODE_ENV=production

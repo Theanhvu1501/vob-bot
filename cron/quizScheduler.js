@@ -6,9 +6,18 @@ const notionService = require("../services/notionService");
 const QUIZ_HOUR = process.env.QUIZ_HOUR || 8;
 const QUIZ_MINUTE = process.env.QUIZ_MINUTE || 0;
 
+// Lấy GROUP_CHAT_ID từ biến môi trường
+const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID || null;
+
 // Store active chat IDs (in a real app, these should be stored in a database)
 // This is a simple in-memory solution for demonstration
 const activeChatIds = new Set();
+
+// Nếu có GROUP_CHAT_ID, thêm vào danh sách active chats
+if (GROUP_CHAT_ID) {
+  activeChatIds.add(GROUP_CHAT_ID);
+  console.log(`Added group chat ID ${GROUP_CHAT_ID} to active list.`);
+}
 
 /**
  * Add a chat ID to the active list
@@ -45,6 +54,21 @@ async function sendDailyQuiz() {
     return;
   }
 
+  // Ưu tiên gửi đến nhóm nếu có
+  if (GROUP_CHAT_ID) {
+    try {
+      await telegramBot.sendQuiz(GROUP_CHAT_ID);
+      console.log(`Sent daily quiz to group chat ID ${GROUP_CHAT_ID}`);
+      return; // Nếu đã gửi đến nhóm, không cần gửi đến các chat khác
+    } catch (error) {
+      console.error(
+        `Error sending quiz to group chat ID ${GROUP_CHAT_ID}:`,
+        error
+      );
+    }
+  }
+
+  // Nếu không có GROUP_CHAT_ID hoặc gửi đến nhóm thất bại, gửi đến các chat cá nhân
   // Check if we have any active chats
   if (activeChatIds.size === 0) {
     console.log("No active chats to send quiz to");
@@ -53,6 +77,9 @@ async function sendDailyQuiz() {
 
   // Send quiz to each active chat
   for (const chatId of activeChatIds) {
+    // Bỏ qua GROUP_CHAT_ID vì đã thử gửi ở trên
+    if (chatId === GROUP_CHAT_ID) continue;
+
     try {
       await telegramBot.sendQuiz(chatId);
       console.log(`Sent daily quiz to chat ID ${chatId}`);

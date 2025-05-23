@@ -11,6 +11,10 @@ const { PREDEFINED_TOPICS, TOPIC_DESCRIPTIONS } = require("../utils/constants");
 const token = process.env.TELEGRAM_BOT_TOKEN;
 let bot;
 
+// Thay đổi cách xử lý chatId
+// Thêm biến để lưu trữ ID của nhóm
+const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID || null;
+
 // Keyboard options
 const MAIN_KEYBOARD = {
   reply_markup: {
@@ -74,23 +78,47 @@ function start() {
     // Lưu chatId vào biến toàn cục để sử dụng trong quizScheduler
     global.userChatId = chatId;
 
-    bot.sendMessage(
-      chatId,
-      "👋 Chào mừng bạn đến với Bot học từ vựng!\n\n" +
-        'Gửi từ vựng theo định dạng: "từ - nghĩa"\n' +
-        'Ví dụ: "inflation - lạm phát"\n\n' +
-        "Bot sẽ tự động phân loại và tạo câu ví dụ cho bạn.",
-      MAIN_KEYBOARD
-    );
+    // Kiểm tra xem đây có phải là nhóm không
+    const isGroup = msg.chat.type === "group" || msg.chat.type === "supergroup";
+
+    if (isGroup) {
+      // Lưu ID nhóm nếu chưa có
+      if (!global.groupChatId) {
+        global.groupChatId = chatId;
+        console.log(`Bot đã được khởi động trong nhóm với ID: ${chatId}`);
+      }
+
+      bot.sendMessage(
+        chatId,
+        "👋 Chào mừng! Bot học từ vựng đã sẵn sàng phục vụ nhóm này.\n\n" +
+          'Các thành viên có thể gửi từ vựng theo định dạng: "từ - nghĩa"\n' +
+          'Ví dụ: "inflation - lạm phát"\n\n' +
+          "Bot sẽ tự động phân loại và tạo câu ví dụ cho mọi người.",
+        MAIN_KEYBOARD
+      );
+    } else {
+      // Phản hồi cho chat cá nhân như trước
+      bot.sendMessage(
+        chatId,
+        "👋 Chào mừng bạn đến với Bot học từ vựng!\n\n" +
+          'Gửi từ vựng theo định dạng: "từ - nghĩa"\n' +
+          'Ví dụ: "inflation - lạm phát"\n\n' +
+          "Bot sẽ tự động phân loại và tạo câu ví dụ cho bạn.",
+        MAIN_KEYBOARD
+      );
+    }
   });
 
   // Thêm lệnh /id để lấy chat ID bất cứ lúc nào
   bot.onText(/\/id/, (msg) => {
     const chatId = msg.chat.id;
+    const chatType = msg.chat.type;
+
     bot.sendMessage(
       chatId,
-      `🆔 Chat ID của bạn là: ${chatId}\n` +
-        "Hãy sao chép ID này và thêm vào file .env với biến USER_CHAT_ID",
+      `🆔 Chat ID: ${chatId}\n` +
+        `📝 Loại chat: ${chatType}\n\n` +
+        "Hãy sao chép ID này và thêm vào file .env với biến GROUP_CHAT_ID",
       MAIN_KEYBOARD
     );
   });
@@ -231,6 +259,8 @@ function start() {
 
     const chatId = msg.chat.id;
     const userId = msg.from.id;
+    const isGroup = msg.chat.type === "group" || msg.chat.type === "supergroup";
+    const userName = msg.from.first_name || "Người dùng";
 
     // Handle keyboard button presses
     if (msg.text === "📝 Thêm từ mới") {
@@ -275,11 +305,14 @@ function start() {
     // Process vocabulary input
     const parts = msg.text.split("-").map((part) => part.trim());
     if (parts.length !== 2) {
-      bot.sendMessage(
-        chatId,
-        'Định dạng không đúng. Vui lòng gửi theo định dạng: "từ - nghĩa"',
-        MAIN_KEYBOARD
-      );
+      // Trong nhóm, chỉ phản hồi khi tin nhắn có định dạng từ vựng
+      if (isGroup && msg.text.includes("-")) {
+        bot.sendMessage(
+          chatId,
+          'Định dạng không đúng. Vui lòng gửi theo định dạng: "từ - nghĩa"',
+          MAIN_KEYBOARD
+        );
+      }
       return;
     }
 
@@ -300,20 +333,21 @@ function start() {
         topic: aiResult.topic,
         example: aiResult.example,
         created_at: new Date().toISOString(),
+        added_by: isGroup ? userName : "User", // Thêm thông tin người thêm từ
       };
 
       await notionService.saveVocabulary(vocabulary);
 
       // Send confirmation with rich formatting
       const message = `
-✅ *Đã lưu từ vựng mới*
+✅ *Đã lưu từ vựng mới* ${isGroup ? `(thêm bởi ${userName})` : ""}
 
 📝 *Từ:* ${word}
 🔤 *Nghĩa:* ${meaning}
 🏷️ *Chủ đề:* ${aiResult.topic}
 📋 *Ví dụ:* _${aiResult.example}_
 
-_Từ này sẽ xuất hiện trong quiz hàng ngày của bạn._
+_Từ này sẽ xuất hiện trong quiz hàng ngày._
       `;
 
       bot.sendMessage(chatId, message, {
@@ -680,13 +714,26 @@ Tổng cộng: ${Object.values(topicStats).reduce((a, b) => a + b, 0)} từ vự
 
 /**
  * Send a vocabulary quiz to the specified chat
- * @param {number} chatId - Telegram chat ID
+ * @param {number} chatId - Telegram chat ID or null to use the group chat ID
  */
-async function sendQuiz(chatId, quizType = null, topic = null) {
+async function sendQuiz(chatId = null, quizType = null, topic = null) {
   try {
+    // Sử dụng GROUP_CHAT_ID từ biến môi trường nếu chatId không được cung cấp
+    // hoặc sử dụng global.groupChatId nếu đã được lưu trước đó
+    const targetChatId =
+      chatId ||
+      global.groupChatId ||
+      process.env.GROUP_CHAT_ID ||
+      global.userChatId;
+
+    if (!targetChatId) {
+      console.error("Không có chat ID nào được cung cấp hoặc lưu trữ trước đó");
+      return;
+    }
+
     // Gửi thông báo "đang tạo quiz" để người dùng biết đang xử lý
     const loadingMessage = await bot.sendMessage(
-      chatId,
+      targetChatId,
       "⏳ Đang tạo quiz...",
       { parse_mode: "Markdown" }
     );
@@ -697,7 +744,7 @@ async function sendQuiz(chatId, quizType = null, topic = null) {
     if (quizData.error) {
       // Cập nhật thông báo thay vì gửi mới
       await bot.editMessageText(quizData.message, {
-        chat_id: chatId,
+        chat_id: targetChatId,
         message_id: loadingMessage.message_id,
         parse_mode: "Markdown",
         ...MAIN_KEYBOARD,
@@ -750,7 +797,7 @@ ${quizData.options.map((option, index) => `${index + 1}. ${option}`).join("\n")}
 
     // Cập nhật thông báo "đang tạo quiz" thành quiz thực tế
     await bot.editMessageText(quizMessage, {
-      chat_id: chatId,
+      chat_id: targetChatId,
       message_id: loadingMessage.message_id,
       parse_mode: "Markdown",
       reply_markup: {
@@ -759,11 +806,13 @@ ${quizData.options.map((option, index) => `${index + 1}. ${option}`).join("\n")}
     });
   } catch (error) {
     console.error("Error creating quiz:", error);
-    bot.sendMessage(
-      chatId,
-      "Có lỗi xảy ra khi tạo quiz. Vui lòng thử lại sau.",
-      MAIN_KEYBOARD
-    );
+    if (chatId) {
+      bot.sendMessage(
+        chatId,
+        "Có lỗi xảy ra khi tạo quiz. Vui lòng thử lại sau.",
+        MAIN_KEYBOARD
+      );
+    }
   }
 }
 
