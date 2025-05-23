@@ -4,6 +4,7 @@ const notionService = require("../services/notionService");
 const helpers = require("../utils/helpers");
 const userService = require("../services/userService");
 const studyService = require("../services/studyService");
+const quizService = require("../services/quizService");
 const { PREDEFINED_TOPICS, TOPIC_DESCRIPTIONS } = require("../utils/constants");
 
 // Initialize the bot with the token from environment variables
@@ -681,7 +682,7 @@ Tổng cộng: ${Object.values(topicStats).reduce((a, b) => a + b, 0)} từ vự
  * Send a vocabulary quiz to the specified chat
  * @param {number} chatId - Telegram chat ID
  */
-async function sendQuiz(chatId) {
+async function sendQuiz(chatId, quizType = null, topic = null) {
   try {
     // Gửi thông báo "đang tạo quiz" để người dùng biết đang xử lý
     const loadingMessage = await bot.sendMessage(
@@ -690,20 +691,17 @@ async function sendQuiz(chatId) {
       { parse_mode: "Markdown" }
     );
 
-    // Get a random vocabulary
-    const vocabulary = await notionService.getRandomVocabulary();
+    // Sử dụng quizService để tạo quiz
+    const quizData = await quizService.createRandomQuiz(quizType, topic);
 
-    if (!vocabulary) {
+    if (quizData.error) {
       // Cập nhật thông báo thay vì gửi mới
-      await bot.editMessageText(
-        "Không tìm thấy từ vựng nào. Hãy thêm một số từ trước khi làm quiz.",
-        {
-          chat_id: chatId,
-          message_id: loadingMessage.message_id,
-          parse_mode: "Markdown",
-          ...MAIN_KEYBOARD,
-        }
-      );
+      await bot.editMessageText(quizData.message, {
+        chat_id: chatId,
+        message_id: loadingMessage.message_id,
+        parse_mode: "Markdown",
+        ...MAIN_KEYBOARD,
+      });
       return;
     }
 
@@ -712,126 +710,53 @@ async function sendQuiz(chatId) {
       global.quizCache = new Map();
     }
 
-    // Tạo ID duy nhất cho quiz này
-    const quizId = Date.now().toString();
+    // Lưu thông tin quiz vào cache
+    global.quizCache.set(quizData.id, {
+      vocabularyId: quizData.vocabularyId,
+      correctAnswer: quizData.correctAnswer,
+      options: quizData.options,
+      type: quizData.type,
+      timestamp: quizData.timestamp,
+    });
 
-    // Determine quiz type (50% chance for each type)
-    const isWordToMeaning = Math.random() < 0.5;
+    // Tự động xóa cache sau 5 phút
+    setTimeout(() => {
+      if (global.quizCache && global.quizCache.has(quizData.id)) {
+        global.quizCache.delete(quizData.id);
+      }
+    }, 5 * 60 * 1000);
 
-    if (isWordToMeaning) {
-      // Word to meaning quiz
-      const wrongMeanings = await notionService.getRandomMeanings(
-        3,
-        vocabulary.meaning
-      );
-
-      // Combine and shuffle options
-      const options = [vocabulary.meaning, ...wrongMeanings];
-      const shuffledOptions = helpers.shuffleArray(options);
-
-      // Lưu thông tin quiz vào cache
-      global.quizCache.set(quizId, {
-        vocabularyId: vocabulary.id,
-        correctAnswer: vocabulary.meaning,
-        options: shuffledOptions,
-        type: "word_to_meaning",
-        timestamp: Date.now(),
-      });
-
-      // Tự động xóa cache sau 5 phút
-      setTimeout(() => {
-        if (global.quizCache && global.quizCache.has(quizId)) {
-          global.quizCache.delete(quizId);
-        }
-      }, 5 * 60 * 1000);
-
-      // Create quiz message
-      const quizMessage = `
-📝 *Quiz từ vựng*
-
-Đâu là nghĩa của từ: *${vocabulary.word}*?
-
-${shuffledOptions.map((option, index) => `${index + 1}. ${option}`).join("\n")}
-      `;
-
-      // Create inline keyboard with options
-      const keyboard = shuffledOptions.map((option, index) => {
-        const isCorrect = option === vocabulary.meaning;
-        return [
-          {
-            text: `${index + 1}`,
-            callback_data: `quiz_answer_${quizId}_${index}_${
-              isCorrect ? "correct" : "wrong"
-            }`,
-          },
-        ];
-      });
-
-      // Cập nhật thông báo "đang tạo quiz" thành quiz thực tế
-      await bot.editMessageText(quizMessage, {
-        chat_id: chatId,
-        message_id: loadingMessage.message_id,
-        parse_mode: "Markdown",
-        reply_markup: {
-          inline_keyboard: keyboard,
+    // Tạo bàn phím inline dựa trên các lựa chọn
+    const keyboard = quizData.options.map((option, index) => {
+      const isCorrect = option === quizData.correctAnswer;
+      return [
+        {
+          text: `${index + 1}`,
+          callback_data: `quiz_answer_${quizData.id}_${index}_${
+            isCorrect ? "correct" : "wrong"
+          }`,
         },
-      });
-    } else {
-      // Meaning to word quiz
-      const wrongWords = await notionService.getRandomWords(3, vocabulary.word);
+      ];
+    });
 
-      // Combine and shuffle options
-      const options = [vocabulary.word, ...wrongWords];
-      const shuffledOptions = helpers.shuffleArray(options);
+    // Tạo nội dung tin nhắn quiz
+    const quizMessage = `
+📝 *Quiz từ vựng${topic ? ` - Chủ đề: ${topic}` : ""}*
 
-      // Lưu thông tin quiz vào cache
-      global.quizCache.set(quizId, {
-        vocabularyId: vocabulary.id,
-        correctAnswer: vocabulary.word,
-        options: shuffledOptions,
-        type: "meaning_to_word",
-        timestamp: Date.now(),
-      });
+${quizData.question}
 
-      // Tự động xóa cache sau 5 phút
-      setTimeout(() => {
-        if (global.quizCache && global.quizCache.has(quizId)) {
-          global.quizCache.delete(quizId);
-        }
-      }, 5 * 60 * 1000);
+${quizData.options.map((option, index) => `${index + 1}. ${option}`).join("\n")}
+    `;
 
-      // Create quiz message
-      const quizMessage = `
-📝 *Quiz từ vựng*
-
-Từ nào có nghĩa là: *${vocabulary.meaning}*?
-
-${shuffledOptions.map((option, index) => `${index + 1}. ${option}`).join("\n")}
-      `;
-
-      // Create inline keyboard with options
-      const keyboard = shuffledOptions.map((option, index) => {
-        const isCorrect = option === vocabulary.word;
-        return [
-          {
-            text: `${index + 1}`,
-            callback_data: `quiz_answer_${quizId}_${index}_${
-              isCorrect ? "correct" : "wrong"
-            }`,
-          },
-        ];
-      });
-
-      // Cập nhật thông báo "đang tạo quiz" thành quiz thực tế
-      await bot.editMessageText(quizMessage, {
-        chat_id: chatId,
-        message_id: loadingMessage.message_id,
-        parse_mode: "Markdown",
-        reply_markup: {
-          inline_keyboard: keyboard,
-        },
-      });
-    }
+    // Cập nhật thông báo "đang tạo quiz" thành quiz thực tế
+    await bot.editMessageText(quizMessage, {
+      chat_id: chatId,
+      message_id: loadingMessage.message_id,
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: keyboard,
+      },
+    });
   } catch (error) {
     console.error("Error creating quiz:", error);
     bot.sendMessage(
@@ -849,189 +774,10 @@ ${shuffledOptions.map((option, index) => `${index + 1}. ${option}`).join("\n")}
  */
 async function sendTopicQuiz(chatId, topic) {
   try {
-    // Gửi thông báo "đang tạo quiz" để người dùng biết đang xử lý
-    const loadingMessage = await bot.sendMessage(
-      chatId,
-      `⏳ Đang tạo quiz chủ đề *${topic}*...`,
-      { parse_mode: "Markdown" }
-    );
-
-    // Get a random vocabulary from the specified topic
-    const vocabulary = await notionService.getRandomVocabularyByTopic(topic);
-
-    if (!vocabulary) {
-      // Cập nhật thông báo thay vì gửi mới
-      await bot.editMessageText(
-        `Không tìm thấy từ vựng nào thuộc chủ đề *${topic}*. Hãy thử chủ đề khác hoặc thêm từ vựng mới.`,
-        {
-          chat_id: chatId,
-          message_id: loadingMessage.message_id,
-          parse_mode: "Markdown",
-          reply_markup: TOPICS_KEYBOARD.reply_markup,
-        }
-      );
-      return;
-    }
-
-    // Khởi tạo cache nếu chưa có
-    if (!global.quizCache) {
-      global.quizCache = new Map();
-    }
-
-    // Tạo ID duy nhất cho quiz này
-    const quizId = Date.now().toString();
-
-    // Determine quiz type (50% chance for each type)
-    const isWordToMeaning = Math.random() < 0.5;
-
-    // Tạo quiz dựa trên loại
-    if (isWordToMeaning) {
-      // Lấy các nghĩa sai từ cùng chủ đề
-      const wrongMeanings = await notionService.getRandomMeaningsByTopic(
-        3,
-        vocabulary.meaning,
-        topic
-      );
-
-      // Combine and shuffle options
-      const options = [vocabulary.meaning, ...wrongMeanings];
-      const shuffledOptions = helpers.shuffleArray(options);
-
-      // Lưu thông tin quiz vào cache
-      global.quizCache.set(quizId, {
-        vocabularyId: vocabulary.id,
-        correctAnswer: vocabulary.meaning,
-        options: shuffledOptions,
-        type: "word_to_meaning",
-        topic: topic,
-        timestamp: Date.now(),
-      });
-
-      // Tự động xóa cache sau 5 phút
-      setTimeout(() => {
-        if (global.quizCache && global.quizCache.has(quizId)) {
-          global.quizCache.delete(quizId);
-        }
-      }, 5 * 60 * 1000);
-
-      // Create quiz message
-      const quizMessage = `
-📝 *Quiz từ vựng - Chủ đề: ${topic}*
-
-Đâu là nghĩa của từ: *${vocabulary.word}*?
-
-${shuffledOptions.map((option, index) => `${index + 1}. ${option}`).join("\n")}
-      `;
-
-      // Create inline keyboard with options
-      const keyboard = shuffledOptions.map((option, index) => {
-        const isCorrect = option === vocabulary.meaning;
-        return [
-          {
-            text: `${index + 1}`,
-            callback_data: `quiz_answer_${quizId}_${index}_${
-              isCorrect ? "correct" : "wrong"
-            }`,
-          },
-        ];
-      });
-
-      // Thêm nút để tiếp tục quiz cùng chủ đề hoặc quay lại
-      keyboard.push([
-        {
-          text: `🔄 Quiz tiếp (${topic})`,
-          callback_data: `topic_${topic}`,
-        },
-        {
-          text: "📋 Chọn chủ đề khác",
-          callback_data: "choose_topic",
-        },
-      ]);
-
-      // Cập nhật thông báo "đang tạo quiz" thành quiz thực tế
-      await bot.editMessageText(quizMessage, {
-        chat_id: chatId,
-        message_id: loadingMessage.message_id,
-        parse_mode: "Markdown",
-        reply_markup: {
-          inline_keyboard: keyboard,
-        },
-      });
-    } else {
-      // Meaning to word quiz
-      const wrongWords = await notionService.getRandomWordsByTopic(
-        3,
-        vocabulary.word,
-        topic
-      );
-
-      // Combine and shuffle options
-      const options = [vocabulary.word, ...wrongWords];
-      const shuffledOptions = helpers.shuffleArray(options);
-
-      // Lưu thông tin quiz vào cache
-      global.quizCache.set(quizId, {
-        vocabularyId: vocabulary.id,
-        correctAnswer: vocabulary.word,
-        options: shuffledOptions,
-        type: "meaning_to_word",
-        topic: topic,
-        timestamp: Date.now(),
-      });
-
-      // Tự động xóa cache sau 5 phút
-      setTimeout(() => {
-        if (global.quizCache && global.quizCache.has(quizId)) {
-          global.quizCache.delete(quizId);
-        }
-      }, 5 * 60 * 1000);
-
-      // Create quiz message
-      const quizMessage = `
-📝 *Quiz từ vựng - Chủ đề: ${topic}*
-
-Từ nào có nghĩa là: *${vocabulary.meaning}*?
-
-${shuffledOptions.map((option, index) => `${index + 1}. ${option}`).join("\n")}
-      `;
-
-      // Create inline keyboard with options
-      const keyboard = shuffledOptions.map((option, index) => {
-        const isCorrect = option === vocabulary.word;
-        return [
-          {
-            text: `${index + 1}`,
-            callback_data: `quiz_answer_${quizId}_${index}_${
-              isCorrect ? "correct" : "wrong"
-            }`,
-          },
-        ];
-      });
-
-      // Thêm nút để tiếp tục quiz cùng chủ đề hoặc quay lại
-      keyboard.push([
-        {
-          text: `🔄 Quiz tiếp (${topic})`,
-          callback_data: `topic_${topic}`,
-        },
-        {
-          text: "📋 Chọn chủ đề khác",
-          callback_data: "choose_topic",
-        },
-      ]);
-
-      // Cập nhật thông báo "đang tạo quiz" thành quiz thực tế
-      await bot.editMessageText(quizMessage, {
-        chat_id: chatId,
-        message_id: loadingMessage.message_id,
-        parse_mode: "Markdown",
-        reply_markup: {
-          inline_keyboard: keyboard,
-        },
-      });
-    }
+    // Gọi hàm sendQuiz với tham số topic
+    await sendQuiz(chatId, null, topic);
   } catch (error) {
-    console.error(`Error creating topic quiz for ${topic}:`, error);
+    console.error(`Error sending topic quiz for ${topic}:`, error);
     bot.sendMessage(
       chatId,
       `Có lỗi xảy ra khi tạo quiz cho chủ đề ${topic}. Vui lòng thử lại sau.`,
