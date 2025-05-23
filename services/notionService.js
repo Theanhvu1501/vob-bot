@@ -333,6 +333,42 @@ async function getAllTopics() {
 }
 
 /**
+ * Lấy thống kê số lượng từ vựng theo chủ đề
+ * @returns {Promise<Object>} - Object với key là tên chủ đề, value là số lượng từ vựng
+ */
+async function getVocabularyStatsByTopic() {
+  try {
+    // Query the database to get all entries
+    const response = await notion.databases.query({
+      database_id: databaseId,
+    });
+
+    // Tạo object để lưu thống kê
+    const topicStats = {};
+
+    // Đếm số lượng từ vựng cho mỗi chủ đề
+    response.results.forEach((entry) => {
+      if (
+        entry.properties.topic &&
+        entry.properties.topic.select &&
+        entry.properties.topic.select.name
+      ) {
+        const topic = entry.properties.topic.select.name;
+        topicStats[topic] = (topicStats[topic] || 0) + 1;
+      } else {
+        // Nếu không có chủ đề, tính vào "General"
+        topicStats["General"] = (topicStats["General"] || 0) + 1;
+      }
+    });
+
+    return topicStats;
+  } catch (error) {
+    console.error("Error getting vocabulary stats by topic:", error);
+    return {};
+  }
+}
+
+/**
  * Helper function to extract content from rich_text array
  * @param {Array} richText - Notion rich_text array
  * @returns {string} - Extracted text content
@@ -367,4 +403,5 @@ module.exports = {
   getRandomMeaningsByTopic,
   getRandomWordsByTopic,
   getAllTopics,
+  getVocabularyStatsByTopic,
 };

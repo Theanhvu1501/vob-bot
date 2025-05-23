@@ -1,4 +1,6 @@
 const { GoogleGenerativeAI } = require("@google/generative-ai");
+const { PREDEFINED_TOPICS } = require("../utils/constants");
+
 // Thêm node-fetch để cung cấp fetch API cho Node.js
 const fetch = require("node-fetch");
 
@@ -15,32 +17,33 @@ console.log(
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 /**
- * Process vocabulary with AI to get topic and example
- * @param {string} word - English vocabulary word
- * @param {string} meaning - Vietnamese meaning
- * @returns {Promise<Object>} - Object containing topic and example
+ * Phân loại từ vựng và tạo ví dụ sử dụng AI
+ * @param {string} word - Từ vựng
+ * @param {string} meaning - Nghĩa của từ
+ * @returns {Promise<{topic: string, example: string}>} - Chủ đề và ví dụ
  */
 async function processVocabulary(word, meaning) {
   try {
-    // Create a prompt for the AI
+    // Tạo prompt cho AI với danh sách chủ đề đã định nghĩa
     const prompt = `
     Analyze the following English vocabulary word and its Vietnamese meaning:
     
-    Word: ${word}
-    Meaning: ${meaning}
+    Word: "${word}"
+    Meaning: "${meaning}"
     
-    Please provide:
-    1. A category/topic this word belongs to (e.g., Economics, Travel, Health, Education, Technology, etc.)
-    2. An example sentence using this word in the correct context
+    Please classify this word into ONE of the following predefined topics:
+    ${PREDEFINED_TOPICS.join(", ")}
+    
+    Also create a short example sentence using this word in the correct context.
     
     Format your response as JSON:
     {
-      "topic": "category name",
-      "example": "example sentence"
+      "topic": "ONE topic from the list above that best fits this word",
+      "example": "A short example sentence using the word"
     }
     `;
 
-    // Get the generative model - use the full model name
+    // Get the generative model
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
     // Generate content
@@ -48,18 +51,31 @@ async function processVocabulary(word, meaning) {
     const response = await result.response;
     const text = response.text();
 
-    // Parse the JSON response
-    // Find JSON in the response (in case AI adds extra text)
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error("AI response does not contain valid JSON");
+    // Parse kết quả JSON
+    try {
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const jsonResult = JSON.parse(jsonMatch[0]);
+
+        // Kiểm tra xem chủ đề có trong danh sách đã định nghĩa không
+        const topic = jsonResult.topic || "General";
+        const validTopic = PREDEFINED_TOPICS.includes(topic)
+          ? topic
+          : "General";
+
+        return {
+          topic: validTopic,
+          example: jsonResult.example || `Example of ${word}: ${meaning}`,
+        };
+      }
+    } catch (parseError) {
+      console.error("Error parsing AI response:", parseError);
     }
 
-    const jsonResponse = JSON.parse(jsonMatch[0]);
-
+    // Fallback nếu không parse được JSON
     return {
-      topic: jsonResponse.topic,
-      example: jsonResponse.example,
+      topic: "General",
+      example: `Example of ${word}: ${meaning}`,
     };
   } catch (error) {
     console.error("Error processing vocabulary with AI:", error);

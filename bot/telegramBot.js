@@ -4,6 +4,7 @@ const notionService = require("../services/notionService");
 const helpers = require("../utils/helpers");
 const userService = require("../services/userService");
 const studyService = require("../services/studyService");
+const { PREDEFINED_TOPICS, TOPIC_DESCRIPTIONS } = require("../utils/constants");
 
 // Initialize the bot with the token from environment variables
 const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -53,6 +54,18 @@ const TOPICS_KEYBOARD = {
  */
 function start() {
   bot = new TelegramBot(token, { polling: true });
+
+  // Thiết lập các lệnh cho bot
+  bot.setMyCommands([
+    { command: "/start", description: "Khởi động bot" },
+    { command: "/help", description: "Xem hướng dẫn sử dụng" },
+    { command: "/quiz", description: "Nhận một quiz ngẫu nhiên" },
+    { command: "/topics", description: "Xem danh sách chủ đề từ vựng" },
+    { command: "/stats", description: "Xem thống kê học tập" },
+    { command: "/review", description: "Ôn tập từ vựng hôm nay" },
+    { command: "/settings", description: "Điều chỉnh cài đặt" },
+    { command: "/id", description: "Lấy ID chat của bạn" },
+  ]);
 
   // Handle /start command
   bot.onText(/\/start/, async (msg) => {
@@ -513,6 +526,154 @@ _Từ này sẽ xuất hiện trong quiz hàng ngày của bạn._
         }
       );
     }
+  });
+
+  // Handle /topics command
+  bot.onText(/\/topics/, async (msg) => {
+    const chatId = msg.chat.id;
+
+    try {
+      // Tạo danh sách chủ đề với mô tả
+      let topicMessage = "📚 *Danh sách chủ đề từ vựng* 📚\n\n";
+
+      // Nhóm các chủ đề theo loại
+      const dailyTopics = PREDEFINED_TOPICS.slice(0, 10);
+      const academicTopics = PREDEFINED_TOPICS.slice(10, 20);
+      const entertainmentTopics = PREDEFINED_TOPICS.slice(20, 28);
+      const socialTopics = PREDEFINED_TOPICS.slice(28, 34);
+      const otherTopics = PREDEFINED_TOPICS.slice(34);
+
+      topicMessage += "*🏠 Giao tiếp hàng ngày:*\n";
+      dailyTopics.forEach((topic) => {
+        topicMessage += `• ${topic}\n`;
+      });
+
+      topicMessage += "\n*🏢 Học thuật & Công việc:*\n";
+      academicTopics.forEach((topic) => {
+        topicMessage += `• ${topic}\n`;
+      });
+
+      topicMessage += "\n*🎭 Giải trí:*\n";
+      entertainmentTopics.forEach((topic) => {
+        topicMessage += `• ${topic}\n`;
+      });
+
+      topicMessage += "\n*👥 Tình cảm & Xã hội:*\n";
+      socialTopics.forEach((topic) => {
+        topicMessage += `• ${topic}\n`;
+      });
+
+      topicMessage += "\n*🔠 Khác:*\n";
+      otherTopics.forEach((topic) => {
+        topicMessage += `• ${topic}\n`;
+      });
+
+      // Gửi thông báo với danh sách chủ đề
+      bot.sendMessage(chatId, topicMessage, {
+        parse_mode: "Markdown",
+        reply_markup: {
+          inline_keyboard: [
+            [
+              {
+                text: "🎮 Quiz theo chủ đề",
+                callback_data: "choose_topic",
+              },
+            ],
+            [
+              {
+                text: "📊 Thống kê từ vựng theo chủ đề",
+                callback_data: "topic_stats",
+              },
+            ],
+          ],
+        },
+      });
+    } catch (error) {
+      console.error("Error displaying topics:", error);
+      bot.sendMessage(
+        chatId,
+        "❌ Có lỗi xảy ra khi hiển thị danh sách chủ đề. Vui lòng thử lại sau.",
+        MAIN_KEYBOARD
+      );
+    }
+  });
+
+  // Thêm xử lý cho callback_data "topic_stats"
+  bot.on("callback_query", async (query) => {
+    const chatId = query.message.chat.id;
+    const data = query.callback_data;
+
+    if (data === "topic_stats") {
+      try {
+        // Gửi thông báo đang tải
+        const loadingMessage = await bot.sendMessage(
+          chatId,
+          "⏳ Đang tải thống kê từ vựng theo chủ đề...",
+          { parse_mode: "Markdown" }
+        );
+
+        // Lấy thống kê từ vựng theo chủ đề từ Notion
+        const topicStats = await notionService.getVocabularyStatsByTopic();
+
+        if (topicStats && Object.keys(topicStats).length > 0) {
+          // Sắp xếp chủ đề theo số lượng từ vựng (từ cao đến thấp)
+          const sortedTopics = Object.entries(topicStats)
+            .sort((a, b) => b[1] - a[1])
+            .map(([topic, count]) => `${topic}: ${count} từ`);
+
+          // Tạo thông báo thống kê
+          const statsMessage = `
+📊 *Thống kê từ vựng theo chủ đề*
+
+${sortedTopics.join("\n")}
+
+Tổng cộng: ${Object.values(topicStats).reduce((a, b) => a + b, 0)} từ vựng
+          `;
+
+          // Cập nhật thông báo với thống kê
+          await bot.editMessageText(statsMessage, {
+            chat_id: chatId,
+            message_id: loadingMessage.message_id,
+            parse_mode: "Markdown",
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  {
+                    text: "📋 Xem danh sách chủ đề",
+                    callback_data: "view_topics",
+                  },
+                ],
+                [
+                  {
+                    text: "🎮 Quiz ngẫu nhiên",
+                    callback_data: "quiz_now",
+                  },
+                ],
+              ],
+            },
+          });
+        } else {
+          await bot.editMessageText(
+            "❌ Chưa có từ vựng nào được thêm vào. Hãy thêm từ vựng mới để xem thống kê.",
+            {
+              chat_id: chatId,
+              message_id: loadingMessage.message_id,
+            }
+          );
+        }
+      } catch (error) {
+        console.error("Error getting topic stats:", error);
+        bot.sendMessage(
+          chatId,
+          "❌ Có lỗi xảy ra khi lấy thống kê. Vui lòng thử lại sau.",
+          MAIN_KEYBOARD
+        );
+      }
+    } else if (data === "view_topics") {
+      // Gọi lại lệnh /topics
+      bot.emit("text", { ...query.message, from: query.from, text: "/topics" });
+    }
+    // Xử lý các callback_data khác...
   });
 }
 
