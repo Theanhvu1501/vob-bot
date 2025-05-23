@@ -39,15 +39,17 @@ jobs:
           TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
           NOTION_API_KEY=${{ secrets.NOTION_API_KEY }}
           NOTION_DATABASE_ID=${{ secrets.NOTION_DATABASE_ID }}
-          GOOGLE_AI_API_KEY=${{ secrets.GOOGLE_AI_API_KEY }}
+          GEMINI_API_KEY=${{ secrets.GOOGLE_AI_API_KEY }}
           USER_CHAT_ID=${{ secrets.USER_CHAT_ID }}
-          QUIZ_SCHEDULE="${{ secrets.QUIZ_SCHEDULE }}"
+          QUIZ_HOUR=${{ secrets.QUIZ_HOUR || '8' }}
+          QUIZ_MINUTE=${{ secrets.QUIZ_MINUTE || '0' }}
           NODE_ENV=production
           EOL
 
       - name: Create docker-compose.yml
         run: |
           cat > docker-compose.yml << EOL
+          version: '3.8'
 
           services:
             vob-bot:
@@ -95,23 +97,3 @@ jobs:
 
             # Kiểm tra logs để đảm bảo container đã khởi động thành công
             docker-compose logs --tail=20
-
-      - name: Send deployment notification
-        if: success()
-        uses: rtCamp/action-slack-notify@v2
-        env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-          SLACK_CHANNEL: deployments
-          SLACK_COLOR: good
-          SLACK_TITLE: Deployment Successful
-          SLACK_MESSAGE: "Vob Bot has been successfully deployed to production :rocket:"
-
-      - name: Send failure notification
-        if: failure()
-        uses: rtCamp/action-slack-notify@v2
-        env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-          SLACK_CHANNEL: deployments
-          SLACK_COLOR: danger
-          SLACK_TITLE: Deployment Failed
-          SLACK_MESSAGE: "Vob Bot deployment failed :x:"
