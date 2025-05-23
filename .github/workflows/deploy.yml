@@ -1,0 +1,117 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches:
+      - master # Thay đổi thành branch của bạn nếu cần
+  workflow_dispatch: # Cho phép chạy thủ công từ giao diện GitHub
+
+jobs:
+  deploy:
+    name: Build and Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ secrets.DOCKER_USERNAME }}/vob-bot:latest
+          cache-from: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/vob-bot:latest
+          cache-to: type=inline
+
+      - name: Create .env file
+        run: |
+          cat > .env << EOL
+          TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
+          NOTION_API_KEY=${{ secrets.NOTION_API_KEY }}
+          NOTION_DATABASE_ID=${{ secrets.NOTION_DATABASE_ID }}
+          GOOGLE_AI_API_KEY=${{ secrets.GOOGLE_AI_API_KEY }}
+          USER_CHAT_ID=${{ secrets.USER_CHAT_ID }}
+          QUIZ_SCHEDULE="${{ secrets.QUIZ_SCHEDULE }}"
+          NODE_ENV=production
+          EOL
+
+      - name: Create docker-compose.yml
+        run: |
+          cat > docker-compose.yml << EOL
+
+          services:
+            vob-bot:
+              image: ${{ secrets.DOCKER_USERNAME }}/vob-bot:latest
+              container_name: vob-bot
+              restart: unless-stopped
+              env_file:
+                - .env
+              volumes:
+                - ./data:/app/data
+          EOL
+
+      - name: Copy files to server
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          source: ".env,docker-compose.yml"
+          target: "/home/${{ secrets.SERVER_USERNAME }}/vob-bot"
+
+      - name: Deploy to server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            cd /home/${{ secrets.SERVER_USERNAME }}/vob-bot
+
+            # Tạo thư mục data nếu chưa tồn tại
+            mkdir -p data
+
+            # Pull image mới nhất
+            docker pull ${{ secrets.DOCKER_USERNAME }}/vob-bot:latest
+
+            # Dừng container cũ nếu đang chạy
+            docker-compose down || true
+
+            # Khởi động container mới
+            docker-compose up -d
+
+            # Xóa các image cũ không sử dụng
+            docker image prune -af --filter "until=24h"
+
+            # Kiểm tra logs để đảm bảo container đã khởi động thành công
+            docker-compose logs --tail=20
+
+      - name: Send deployment notification
+        if: success()
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_CHANNEL: deployments
+          SLACK_COLOR: good
+          SLACK_TITLE: Deployment Successful
+          SLACK_MESSAGE: "Vob Bot has been successfully deployed to production :rocket:"
+
+      - name: Send failure notification
+        if: failure()
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_CHANNEL: deployments
+          SLACK_COLOR: danger
+          SLACK_TITLE: Deployment Failed
+          SLACK_MESSAGE: "Vob Bot deployment failed :x:"

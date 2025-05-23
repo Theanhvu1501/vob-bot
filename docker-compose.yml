@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   vob-bot:
     build:
@@ -7,6 +5,8 @@ services:
       dockerfile: Dockerfile
     container_name: vob-bot
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
       - NODE_ENV=production
       # Các biến môi trường khác sẽ được đọc từ file .env
