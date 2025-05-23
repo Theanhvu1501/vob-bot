@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  vob-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vob-bot
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      # Các biến môi trường khác sẽ được đọc từ file .env
+    volumes:
+      # Volume để lưu trữ dữ liệu nếu cần
+      - ./data:/app/data
+    # Nếu bạn cần expose port (tùy chọn)
+    # ports:
+    #   - "3000:3000"

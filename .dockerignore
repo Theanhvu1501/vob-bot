@@ -1,0 +1,25 @@
+# Các thư mục không cần thiết
+node_modules
+npm-debug.log
+.git
+.github
+.vscode
+
+# Các file môi trường và bảo mật
+.env
+.env.*
+*.pem
+*.key
+
+# Các file log và cache
+logs
+*.log
+.npm
+.DS_Store
+
+# Các file tài liệu và test
+README.md
+CHANGELOG.md
+test
+tests
+docs
