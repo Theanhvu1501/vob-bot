@@ -13,6 +13,7 @@ telegramBot.start();
 quizScheduler.start();
 
 console.log("Vocabulary learning bot is running...");
+console.log("Vocabulary learning bot is running...");
 
 // Handle graceful shutdown
 process.on("SIGINT", () => {
