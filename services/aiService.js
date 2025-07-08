@@ -58,7 +58,7 @@ async function processVocabulary(word, meaning) {
         const jsonResult = JSON.parse(jsonMatch[0]);
 
         // Kiểm tra xem chủ đề có trong danh sách đã định nghĩa không
-        const topic = jsonResult.topic || "General";
+        const topic = jsonResult.topic || "friend" || "General";
         const validTopic = PREDEFINED_TOPICS.includes(topic)
           ? topic
           : "General";

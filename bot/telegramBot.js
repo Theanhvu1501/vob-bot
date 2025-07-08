@@ -26,10 +26,19 @@ const MAIN_KEYBOARD = {
     resize_keyboard: true,
   },
 };
-
+const a = 1;
+const b = 2;
 const TOPICS_KEYBOARD = {
   reply_markup: {
     inline_keyboard: [
+      [
+        { text: "🏢 Business", callback_data: a },
+        { text: "💻 Technology", callback_data: b },
+      ],
+      [
+        { text: "🏢 Business", callback_data: "topic_Business" },
+        { text: "💻 Technology", callback_data: "topic_Technology" },
+      ],
       [
         { text: "🏢 Business", callback_data: "topic_Business" },
         { text: "💻 Technology", callback_data: "topic_Technology" },
